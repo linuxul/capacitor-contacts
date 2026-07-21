@@ -132,16 +132,14 @@ public class ContactsPlugin extends Plugin {
                                 JSObject result = new JSObject();
                                 result.put("contacts", contactsJSArray);
 
-                                bridge
-                                    .getActivity()
-                                    .runOnUiThread(
-                                        new Runnable() {
-                                            @Override
-                                            public void run() {
-                                                call.resolve(result);
-                                            }
+                                bridge.getActivity().runOnUiThread(
+                                    new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            call.resolve(result);
                                         }
-                                    );
+                                    }
+                                );
                             } catch (Exception exception) {
                                 rejectCall(call, exception);
                             }
@@ -248,7 +246,7 @@ public class ContactsPlugin extends Plugin {
 
     private void rejectCall(PluginCall call, Exception exception) {
         String message = exception.getMessage();
-        message = (message != null) ? message : "An error occurred.";
+        message = message != null ? message : "An error occurred.";
         Logger.error(TAG, message, exception);
         call.reject(message);
     }

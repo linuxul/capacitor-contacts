@@ -215,12 +215,13 @@ public class Contacts {
         ops.add(op.build());
 
         // Note
-        op = ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
-            .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
-            // Add to this key
-            .withValue(ContactsContract.Data.MIMETYPE, Note.CONTENT_ITEM_TYPE)
-            // Data
-            .withValue(Note.NOTE, contactInput.note);
+        op =
+            ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+                // Add to this key
+                .withValue(ContactsContract.Data.MIMETYPE, Note.CONTENT_ITEM_TYPE)
+                // Data
+                .withValue(Note.NOTE, contactInput.note);
         ops.add(op.build());
 
         // @TODO not sure where to allow yields
@@ -265,12 +266,13 @@ public class Contacts {
 
         // URLs
         for (int i = 0; i < contactInput.urls.size(); i++) {
-            op = ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
-                .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
-                // Add to this key
-                .withValue(ContactsContract.Data.MIMETYPE, Website.CONTENT_ITEM_TYPE)
-                // Data
-                .withValue(Website.URL, contactInput.urls.get(i));
+            op =
+                ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                    .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+                    // Add to this key
+                    .withValue(ContactsContract.Data.MIMETYPE, Website.CONTENT_ITEM_TYPE)
+                    // Data
+                    .withValue(Website.URL, contactInput.urls.get(i));
             ops.add(op.build());
         }
 
@@ -301,12 +303,13 @@ public class Contacts {
         if (contactInput.image != null && contactInput.image.base64String != null) {
             byte[] photoData = Base64.decode(contactInput.image.base64String, Base64.DEFAULT);
 
-            op = ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
-                .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
-                // Add to this key
-                .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Photo.CONTENT_ITEM_TYPE)
-                // Data
-                .withValue(ContactsContract.CommonDataKinds.Photo.PHOTO, photoData);
+            op =
+                ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                    .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+                    // Add to this key
+                    .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Photo.CONTENT_ITEM_TYPE)
+                    // Data
+                    .withValue(ContactsContract.CommonDataKinds.Photo.PHOTO, photoData);
             ops.add(op.build());
         }
 
