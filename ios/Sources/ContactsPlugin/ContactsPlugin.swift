@@ -16,13 +16,13 @@ public class ContactsPlugin: CAPPlugin, CAPBridgedPlugin, CNContactPickerDelegat
     public let identifier = "ContactsPlugin"
     public let jsName = "Contacts"
     public let pluginMethods: [CAPPluginMethod] = [
-        CAPPluginMethod(name: "checkPermissions", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "requestPermissions", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "getContact", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "getContacts", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "createContact", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "deleteContact", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "pickContact", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "checkPermissions", returnType: .promise),
+        CAPPluginMethod(name: "requestPermissions", returnType: .promise),
+        CAPPluginMethod(name: "getContact", returnType: .promise),
+        CAPPluginMethod(name: "getContacts", returnType: .promise),
+        CAPPluginMethod(name: "createContact", returnType: .promise),
+        CAPPluginMethod(name: "deleteContact", returnType: .promise),
+        CAPPluginMethod(name: "pickContact", returnType: .promise)
     ]
 
     private let implementation = Contacts()
