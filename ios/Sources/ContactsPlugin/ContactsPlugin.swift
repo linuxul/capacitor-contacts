@@ -1,40 +1,46 @@
 import Foundation
+import UIKit
 import Capacitor
 import Contacts
 import ContactsUI
 
-enum CallingMethod {
-    case GetContact
-    case GetContacts
-    case CreateContact
-    case DeleteContact
-    case PickContact
-}
-
 @objc(ContactsPlugin)
-public class ContactsPlugin: CAPPlugin, CAPBridgedPlugin, CNContactPickerDelegate {
+public class ContactsPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "ContactsPlugin"
     public let jsName = "Contacts"
     public let pluginMethods: [CAPPluginMethod] = [
-        CAPPluginMethod(name: "checkPermissions", returnType: .promise),
-        CAPPluginMethod(name: "requestPermissions", returnType: .promise),
-        CAPPluginMethod(name: "getContact", returnType: .promise),
-        CAPPluginMethod(name: "getContacts", returnType: .promise),
-        CAPPluginMethod(name: "createContact", returnType: .promise),
-        CAPPluginMethod(name: "deleteContact", returnType: .promise),
-        CAPPluginMethod(name: "pickContact", returnType: .promise)
+        .promise("checkPermissions", ContactsPlugin.checkPermissions),
+        .async("requestPermissions", ContactsPlugin.requestContactsPermissions),
+        .promise("getContact", ContactsPlugin.getContact),
+        .promise("getContacts", ContactsPlugin.getContacts),
+        .promise("createContact", ContactsPlugin.createContact),
+        .promise("deleteContact", ContactsPlugin.deleteContact),
+        .async("pickContact", ContactsPlugin.pickContact)
     ]
+    static let permissionRequiredMessage = "Permission is required to access contacts."
+    static let noPresenterMessage = "Unable to display the contact picker: there is no view controller to present it from"
+    static let pickerCancelledMessage = "User cancelled the contact picker."
+    private static var pickerDelegateKey: UInt8 = 0
 
     private let implementation = Contacts()
 
-    private var callingMethod: CallingMethod?
+    override public func checkPermissions(_ call: CAPPluginCall) {
+        call.resolve(Self.permissionResult(CNContactStore.authorizationStatus(for: .contacts)))
+    }
 
-    private var pickContactCallbackId: String?
+    /// Asks for contacts access and returns the resulting state, as `checkPermissions` does. Registered as
+    /// `requestPermissions`: an async method cannot override the synchronous `CAPPlugin.requestPermissions`.
+    func requestContactsPermissions(_ call: CAPPluginCall) async throws -> JSObject {
+        // As before, a failed request is not an error: the call answers the state the request left.
+        _ = try? await CNContactStore().requestAccess(for: .contacts)
+        return Self.permissionResult(CNContactStore.authorizationStatus(for: .contacts))
+    }
 
-    @objc override public func checkPermissions(_ call: CAPPluginCall) {
+    /// `{ contacts }` with the permission state for `status`.
+    static func permissionResult(_ status: CNAuthorizationStatus) -> JSObject {
         let permissionState: String
 
-        switch CNContactStore.authorizationStatus(for: .contacts) {
+        switch status {
         case .notDetermined:
             permissionState = "prompt"
         case .restricted, .denied:
@@ -47,29 +53,12 @@ public class ContactsPlugin: CAPPlugin, CAPBridgedPlugin, CNContactPickerDelegat
             permissionState = "prompt"
         }
 
-        call.resolve([
+        return [
             "contacts": permissionState
-        ])
+        ]
     }
 
-    @objc override public func requestPermissions(_ call: CAPPluginCall) {
-        CNContactStore().requestAccess(for: .contacts) { [weak self] _, _  in
-            self?.checkPermissions(call)
-        }
-    }
-
-    private func requestContactsPermission(_ call: CAPPluginCall, _ callingMethod: CallingMethod) {
-        self.callingMethod = callingMethod
-        if isContactsPermissionGranted() {
-            permissionCallback(call)
-        } else {
-            CNContactStore().requestAccess(for: .contacts) { [weak self] _, _  in
-                self?.permissionCallback(call)
-            }
-        }
-    }
-
-    private func isContactsPermissionGranted() -> Bool {
+    private static func isContactsPermissionGranted() -> Bool {
         switch CNContactStore.authorizationStatus(for: .contacts) {
         case .notDetermined, .restricted, .denied:
             return false
@@ -80,52 +69,40 @@ public class ContactsPlugin: CAPPlugin, CAPBridgedPlugin, CNContactPickerDelegat
         }
     }
 
-    private func permissionCallback(_ call: CAPPluginCall) {
-        let method = self.callingMethod
+    // getContact, getContacts, createContact and deleteContact stay synchronous: the bridge queue runs them in the
+    // order of the calls, so a read sees the contacts created and deleted before it. Async methods would not keep
+    // that order.
 
-        self.callingMethod = nil
-
-        if !isContactsPermissionGranted() {
-            call.reject("Permission is required to access contacts.")
+    /// Runs `body` with `call` right away when contacts access is granted. Otherwise asks for access first, and then
+    /// runs `body` or rejects the call, from the completion of the request; what `body` throws there rejects the call.
+    private func withContactsPermission(_ call: CAPPluginCall, _ body: @escaping (CAPPluginCall) throws -> Void) throws {
+        if Self.isContactsPermissionGranted() {
+            try body(call)
             return
         }
-
-        switch method {
-        case .GetContact:
-            getContact(call)
-        case .GetContacts:
-            getContacts(call)
-        case .CreateContact:
-            createContact(call)
-        case .DeleteContact:
-            deleteContact(call)
-        case .PickContact:
-            pickContact(call)
-        default:
-            // No method was being called,
-            // so nothing has to be done here.
-            break
+        CNContactStore().requestAccess(for: .contacts) { _, _ in
+            guard Self.isContactsPermissionGranted() else {
+                call.reject(Self.permissionRequiredMessage)
+                return
+            }
+            do {
+                try body(call)
+            } catch {
+                call.reject(error)
+            }
         }
     }
 
-    @objc func getContact(_ call: CAPPluginCall) {
-        if !isContactsPermissionGranted() {
-            requestContactsPermission(call, CallingMethod.GetContact)
-        } else {
-            let contactId = call.getString("contactId")
-
-            guard let contactId = contactId else {
-                call.reject("Parameter `contactId` not provided.")
-                return
+    func getContact(_ call: CAPPluginCall) throws {
+        try withContactsPermission(call) { [implementation] call in
+            guard let contactId = call.getString("contactId") else {
+                throw CAPPluginError("Parameter `contactId` not provided.")
             }
 
             let projectionInput = GetContactsProjectionInput(call.getObject("projection") ?? JSObject())
 
-            let contact = implementation.getContact(contactId, projectionInput)
-
-            guard let contact = contact else {
-                call.reject("Contact not found.")
-                return
+            guard let contact = implementation.getContact(contactId, projectionInput) else {
+                throw CAPPluginError("Contact not found.")
             }
 
             call.resolve([
@@ -134,10 +111,8 @@ public class ContactsPlugin: CAPPlugin, CAPBridgedPlugin, CNContactPickerDelegat
         }
     }
 
-    @objc func getContacts(_ call: CAPPluginCall) {
-        if !isContactsPermissionGranted() {
-            requestContactsPermission(call, CallingMethod.GetContacts)
-        } else {
+    func getContacts(_ call: CAPPluginCall) throws {
+        try withContactsPermission(call) { [implementation] call in
             let projectionInput = GetContactsProjectionInput(call.getObject("projection") ?? JSObject())
 
             let contacts = implementation.getContacts(projectionInput)
@@ -154,17 +129,12 @@ public class ContactsPlugin: CAPPlugin, CAPBridgedPlugin, CNContactPickerDelegat
         }
     }
 
-    @objc func createContact(_ call: CAPPluginCall) {
-        if !isContactsPermissionGranted() {
-            requestContactsPermission(call, CallingMethod.CreateContact)
-        } else {
+    func createContact(_ call: CAPPluginCall) throws {
+        try withContactsPermission(call) { [implementation] call in
             let contactInput = CreateContactInput.init(call.getObject("contact", JSObject()))
 
-            let contactId = implementation.createContact(contactInput)
-
-            guard let contactId = contactId else {
-                call.reject("Something went wrong.")
-                return
+            guard let contactId = implementation.createContact(contactInput) else {
+                throw CAPPluginError("Something went wrong.")
             }
 
             call.resolve([
@@ -173,61 +143,96 @@ public class ContactsPlugin: CAPPlugin, CAPBridgedPlugin, CNContactPickerDelegat
         }
     }
 
-    @objc func deleteContact(_ call: CAPPluginCall) {
-        if !isContactsPermissionGranted() {
-            requestContactsPermission(call, CallingMethod.DeleteContact)
-        } else {
-            let contactId = call.getString("contactId")
-
-            guard let contactId = contactId else {
-                call.reject("Parameter `contactId` not provided.")
-                return
+    func deleteContact(_ call: CAPPluginCall) throws {
+        try withContactsPermission(call) { [implementation] call in
+            guard let contactId = call.getString("contactId") else {
+                throw CAPPluginError("Parameter `contactId` not provided.")
             }
 
             if !implementation.deleteContact(contactId) {
-                call.reject("Something went wrong.")
-                return
+                throw CAPPluginError("Something went wrong.")
             }
 
             call.resolve()
         }
     }
 
-    @objc func pickContact(_ call: CAPPluginCall) {
-        if !isContactsPermissionGranted() {
-            requestContactsPermission(call, CallingMethod.PickContact)
-        } else {
-            DispatchQueue.main.async {
-                // Save the call and its callback id
-                self.bridge?.saveCall(call)
-                self.pickContactCallbackId = call.callbackId
-
-                // Initialize the contact picker
-                let contactPicker = CNContactPickerViewController()
-                // Mark current class as the delegate class,
-                // this will make the callback `contactPicker` actually work.
-                contactPicker.delegate = self
-                // Present (open) the native contact picker.
-                self.bridge?.viewController?.present(contactPicker, animated: true)
+    /// Presents the system contact picker, which is UIKit, so the method runs on the main actor. Returns
+    /// `{ contact }` for the chosen contact; rejects when the picker closes without one or cannot be presented.
+    @MainActor
+    func pickContact(_ call: CAPPluginCall) async throws -> JSObject {
+        if !Self.isContactsPermissionGranted() {
+            _ = try? await CNContactStore().requestAccess(for: .contacts)
+            guard Self.isContactsPermissionGranted() else {
+                throw CAPPluginError(Self.permissionRequiredMessage)
             }
+        }
+        guard let presenter = Self.topmostPresenter(from: bridge?.viewController) else {
+            throw CAPPluginError(Self.noPresenterMessage)
+        }
+
+        let outcome = await withCheckedContinuation { (continuation: CheckedContinuation<PickOutcome, Never>) in
+            let answer = OnceContinuation(continuation, fallback: PickOutcome.cancelled)
+            let delegate = ContactPickerDelegate(answer)
+            let picker = CNContactPickerViewController()
+            // The picker holds its delegate weakly; the delegate lives as long as the picker, and answers `cancelled`
+            // when the picker is released without a choice (for example dismissed by the app).
+            picker.delegate = delegate
+            objc_setAssociatedObject(picker, &Self.pickerDelegateKey, delegate, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            presenter.present(picker, animated: true)
+            // UIKit sets presentedViewController as soon as it accepts a presentation.
+            if presenter.presentedViewController !== picker {
+                answer.resume(returning: .refused)
+            }
+        }
+
+        switch outcome {
+        case .picked(let selectedContact):
+            let contact = ContactPayload(selectedContact.identifier)
+            contact.fillData(selectedContact)
+            return [
+                "contact": contact.getJSObject()
+            ]
+        case .cancelled:
+            throw CAPPluginError(Self.pickerCancelledMessage)
+        case .refused:
+            throw CAPPluginError(Self.noPresenterMessage)
         }
     }
 
-    public func contactPicker(_ picker: CNContactPickerViewController, didSelect selectedContact: CNContact) {
-        let call = self.bridge?.savedCall(withID: self.pickContactCallbackId ?? "")
-
-        guard let call = call else {
-            return
+    /// The view controller to present from: the last controller in the chain presented over `root`, skipping one that
+    /// is being dismissed. Presenting from `root` itself while it already presents a controller fails silently.
+    @MainActor
+    static func topmostPresenter(from root: UIViewController?) -> UIViewController? {
+        var presenter = root
+        while let presented = presenter?.presentedViewController, !presented.isBeingDismissed {
+            presenter = presented
         }
+        return presenter
+    }
+}
 
-        let contact = ContactPayload(selectedContact.identifier)
+/// How a contact picker closed.
+enum PickOutcome {
+    case picked(CNContact)
+    case cancelled
+    /// UIKit refused to present the picker.
+    case refused
+}
 
-        contact.fillData(selectedContact)
+/// Answers a pick with the first thing the picker reports.
+final class ContactPickerDelegate: NSObject, CNContactPickerDelegate {
+    private let answer: OnceContinuation<PickOutcome>
 
-        call.resolve([
-            "contact": contact.getJSObject()
-        ])
+    init(_ answer: OnceContinuation<PickOutcome>) {
+        self.answer = answer
+    }
 
-        self.bridge?.releaseCall(call)
+    func contactPicker(_ picker: CNContactPickerViewController, didSelect contact: CNContact) {
+        answer.resume(returning: .picked(contact))
+    }
+
+    func contactPickerDidCancel(_ picker: CNContactPickerViewController) {
+        answer.resume(returning: .cancelled)
     }
 }
